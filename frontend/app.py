@@ -306,7 +306,7 @@ def fetch_document_versions(document_id):
         return [f"{version['version']}" for version in versions]  
     return []  
 
-def load_version(document_id, version):  
+def load_version(document_id, version):
     # Fix: Use the correct endpoint for document versions
     if version == "0":
         # For the original version, use the standard document endpoint
@@ -326,8 +326,12 @@ def load_version(document_id, version):
         if version == "0":
             return response.json().get("content", "")
         # For version endpoint, we need to handle the response differently
-        # The content is returned as bytes in the response content
-        return response.content.decode('utf-8') if hasattr(response, 'content') else ""
+        # The content should be text/markdown
+        try:
+            return response.content.decode('utf-8')
+        except:
+            # Fallback if there's an issue with decoding
+            return response.text if hasattr(response, 'text') else ""
     return ""
 
 def load_document_and_versions(document_id, session_id):  
