@@ -1,0 +1,27 @@
+{  
+  "models": [  
+    {  
+      "id": "o4-mini",  
+      "name": "o4-mini",  
+      "description": "General purpose model for most tasks",  
+      "config": {  
+        "AZURE_OPENAI_API_KEY":"CVeP86MUIuelsgD7AyQdI6kVxMfAM27h91LwoxdeVNEIC0P9j7pTJQQJ99BDACHYHv6XJ3w3AAAAACOG3KDl", 
+        "AZURE_OPENAI_ENDPOINT":"https://tday-m9x0vaiw-eastus2.openai.azure.com/",
+        "AZURE_OPENAI_API_VERSION":"2025-01-01-preview",
+        "AZURE_OPENAI_MODEL":"o4-mini"
+      }  
+    },  
+    {  
+      "id": "o1-mini",  
+      "name": "o1-mini",  
+      "description": "General purpose model for most tasks",  
+      "config": {  
+        "AZURE_OPENAI_API_KEY":"BKROKEN2bOuYyJ61ppfLFPb8pz2AYRE2CtKPVxHwOWNgcw5vCE48sWDb17WJQQJ99BCACYeBjFXJ3w3AAAAACOG4XvP", 
+        "AZURE_OPENAI_ENDPOINT":"brokenhttps://timaifoundry5402922979.openai.azure.com/",
+        "AZURE_OPENAI_API_VERSION":"2024-12-01-preview",
+        "AZURE_OPENAI_MODEL":"o1-mini"
+      }
+    } 
+  ],  
+  "default_model": "o1-mini"  
+}

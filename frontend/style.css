@@ -1,0 +1,95 @@
+.gradio-container {  
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;  
+}  
+
+.chat-window {  
+    height: 500px;  
+    overflow-y: auto;  
+    border: 1px solid #e0e0e0;  
+    border-radius: 8px;  
+    padding: 16px;  
+}  
+
+.document-preview {  
+    height: 600px;  
+    overflow-y: auto;  
+    border: 1px solid #e0e0e0;  
+    border-radius: 8px;  
+    padding: 16px;  
+    font-family: monospace;  
+}  
+
+.primary-button {  
+    background-color: #2563eb;  
+    color: white;  
+    border: none;  
+    border-radius: 4px;  
+    padding: 8px 16px;  
+    cursor: pointer;  
+}  
+
+.secondary-button {  
+    background-color: #f3f4f6;  
+    color: #1f2937;  
+    border: 1px solid #d1d5db;  
+    border-radius: 4px;  
+    padding: 8px 16px;  
+    cursor: pointer;  
+}  
+
+.status-message {  
+    margin-top: 8px;  
+    padding: 8px;  
+    border-radius: 4px;  
+}  
+
+.status-success {  
+    background-color: #d1fae5;  
+    color: #065f46;  
+}  
+
+.status-error {  
+    background-color: #fee2e2;  
+    color: #b91c1c;  
+}
+
+/* Orange button styling */  
+.orange-button {  
+    background-color: #FF9800 !important; /* Orange color */  
+    border-color: #FF9800 !important;  
+    color: white !important;  
+}  
+
+.orange-button:hover {  
+    background-color: #F57C00 !important; /* Slightly darker orange for hover */  
+    border-color: #F57C00 !important;  
+}  
+
+/* Green button styling */  
+.green-button {  
+    background-color: #4CAF50 !important; /* Green color */  
+    border-color: #4CAF50 !important;  
+    color: white !important;  
+}  
+
+.green-button:hover {  
+    background-color: #388E3C !important; /* Slightly darker green for hover */  
+    border-color: #388E3C !important;  
+}
+
+/* Save button styling (Red Hover)*/  
+.save-button {  
+    background-color: #2563eb !important; /* Green color */  
+    border-color: #2563eb !important;  
+    color: white !important;  
+}  
+
+.save-button:hover {  
+    background-color: #bd0c0c !important; /* Slightly darker green for hover */  
+    border-color: #bd0c0c !important;  
+}
+
+.scrollable-preview textarea {  
+    overflow-y: auto !important;
+    scrollbar-width: thin;
+}

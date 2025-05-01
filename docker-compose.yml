@@ -1,0 +1,69 @@
+version: '3.8'  
+
+services:  
+  frontend:  
+    build:  
+      context: ./frontend  
+      dockerfile: Dockerfile  
+    ports:  
+      - "7860:7860"  
+    environment:  
+      - API_URL=http://backend:8000  
+    depends_on:  
+      - backend  
+    restart: always  
+    networks:  
+      - docai-network  
+
+  backend:  
+    build:  
+      context: ./backend  
+      dockerfile: Dockerfile  
+    ports:  
+      - "8000:8000"  
+    environment:  
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/docai  
+      - AZURE_STORAGE_CONNECTION_STRING=${AZURE_STORAGE_CONNECTION_STRING}  
+      - AZURE_STORAGE_CONTAINER=documents  
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}  
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}  
+      - AZURE_OPENAI_API_VERSION=${AZURE_OPENAI_API_VERSION}  
+      - AZURE_OPENAI_MODEL=${AZURE_OPENAI_MODEL}
+      - CONVERTER_MICROSERVICE_URL=${CONVERTER_MICROSERVICE_URL}
+      # Add any other backend env vars here  
+    depends_on:  
+      - db  
+      - converter-service   # Pandoc & Markitdown must be up for backend to convert files  
+    restart: always  
+    networks:  
+      - docai-network  
+
+  converter-service:  
+    build:  
+      context: ./backend/converter-service
+      dockerfile: Dockerfile  
+    ports:  
+      - "5000:5000"  
+    restart: always  
+    networks:  
+      - docai-network  
+
+  db:  
+    image: postgres:15  
+    volumes:  
+      - postgres_data:/var/lib/postgresql/data/  
+    environment:  
+      - POSTGRES_PASSWORD=postgres  
+      - POSTGRES_USER=postgres  
+      - POSTGRES_DB=docai  
+    ports:  
+      - "5432:5432"  
+    networks:  
+      - docai-network  
+
+networks:  
+  docai-network:  
+    driver: bridge  
+
+volumes:  
+  postgres_data:
