@@ -67,7 +67,17 @@ def create_app():
                     fn=load_version,  
                     inputs=[document_selector, version_selector],  
                     outputs=[editor_content]  
-                )  
+                ).then(
+                    # Update the document preview with the loaded version content
+                    fn=lambda content: content,
+                    inputs=[editor_content],
+                    outputs=[document_preview]
+                ).then(
+                    # Also update the document editor with the same content
+                    fn=lambda content: content,
+                    inputs=[editor_content],
+                    outputs=[document_editor]
+                )
 
             # --- Chat Tab ---  
             with gr.TabItem("Chat with Document"):  
@@ -259,17 +269,15 @@ def fetch_versions(document_id):
     return []  
 
 
+
 def select_version(document_id, version_label):  
     """Select a specific version of the document."""  
     if version_label == "Original":  
         return load_document_and_versions(document_id)  
-    
     version_number = int(version_label[1:])  
     r = safe_api_call("GET", f"{API_URL}/documents/{document_id}?version={version_number}")  
-    
     if not r:  
         return "", "Error loading the selected version."  
-
     content = r.json().get("content", "")  
     return content, f"Loaded version {version_number}."  
 
@@ -290,7 +298,6 @@ def download_selected_version(document_id, version_label):
         return tmp_file.name  
     return None  
 
-
 def fetch_document_versions(document_id):  
     response = safe_api_call("GET", f"{API_URL}/documents/{document_id}/versions")  
     if response:  
@@ -299,10 +306,28 @@ def fetch_document_versions(document_id):
     return []  
 
 def load_version(document_id, version):  
-    response = safe_api_call("GET", f"{API_URL}/documents/{document_id}?version={version}")  
-    if response:  
-        return response.json().get("content", "")  
-    return ""  
+    # Fix: Use the correct endpoint for document versions
+    if version == "0":
+        # For the original version, use the standard document endpoint
+        response = safe_api_call("GET", f"{API_URL}/documents/{document_id}")
+    else:
+        # For other versions, use the version-specific endpoint
+        response = safe_api_call("GET", f"{API_URL}/documents/{document_id}/version/{version}")
+    
+    if response:
+        # Update the session state with the current version
+        session_id = list(session_states.keys())[0] if session_states else None
+        if session_id:
+            session = get_session_state(session_id)
+            session["current_version"] = version
+        
+        # For the standard endpoint, content is directly in the JSON
+        if version == "0":
+            return response.json().get("content", "")
+        # For version endpoint, we need to handle the response differently
+        # The content is returned as bytes in the response content
+        return response.content.decode('utf-8') if hasattr(response, 'content') else ""
+    return ""
 
 def load_document_and_versions(document_id, session_id):  
     # 1) load the document preview + state  
@@ -482,25 +507,42 @@ def save_document_changes(document_id, document_content, session_id):
     else:  
         return document_content, "Error saving document.", {}  
 
-def download_document(document_id, current_content, session_id):  
-    if document_id == "Select Document":  
-        return None  
-    if isinstance(document_id, list):  
-        document_id = document_id[0] if document_id else None  
-    if not document_id:  
-        return None  
-    response = safe_api_call("GET", f"{API_URL}/documents/{document_id}/download")  
-    if response:  
-        filename_response = safe_api_call("GET", f"{API_URL}/documents/{document_id}")  
-        filename = "document.txt"  
-        if filename_response:  
-            doc_data = filename_response.json()  
-            filename = doc_data.get("name", filename)  
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{filename}")  
-        temp_file.write(response.content)  
-        temp_file.close()  
-        return temp_file.name  
-    return None  
+def download_document(document_id, current_content, session_id, version=None):
+    if document_id == "Select Document":
+        return None
+    if isinstance(document_id, list):
+        document_id = document_id[0] if document_id else None
+    if not document_id:
+        return None
+    
+    # If a version is specified, use the version-specific endpoint
+    if version and version != "0":
+        response = safe_api_call("GET", f"{API_URL}/documents/{document_id}/version/{version}?format=md")
+        if response:
+            filename_response = safe_api_call("GET", f"{API_URL}/documents/{document_id}")
+            filename = "document.txt"
+            if filename_response:
+                doc_data = filename_response.json()
+                base_filename = doc_data.get("name", "document").rsplit('.', 1)[0]
+                filename = f"{base_filename}_v{version}.md"
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{filename}")
+            temp_file.write(response.content)
+            temp_file.close()
+            return temp_file.name
+    else:
+        # For the original version, use the standard download endpoint
+        response = safe_api_call("GET", f"{API_URL}/documents/{document_id}/download")
+        if response:
+            filename_response = safe_api_call("GET", f"{API_URL}/documents/{document_id}")
+            filename = "document.txt"
+            if filename_response:
+                doc_data = filename_response.json()
+                filename = doc_data.get("name", filename)
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{filename}")
+            temp_file.write(response.content)
+            temp_file.close()
+            return temp_file.name
+    return None
 
 # --- Run the App ---  
 app = create_app()  
