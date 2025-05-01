@@ -35,10 +35,6 @@ def create_app():
         gr.Markdown("# Document AI Assistant")  
         document_state, current_document_id, editor_content = gr.State({}), gr.State(None), gr.State("")  
         
-        # Define document_editor at the top level, before it's referenced
-        document_editor = gr.Textbox(
-            label="Document Editor", lines=25, max_lines=25, interactive=True, elem_classes=['scrollable-preview'])
-
         with gr.Tabs() as tabs:  
             # --- Document Management Tab ---  
             with gr.TabItem("Document Management"):  
@@ -109,6 +105,9 @@ def create_app():
 
             # --- Edit Document Tab ---  
             with gr.TabItem("Edit Document"):
+                document_editor = gr.Textbox(
+                    label="Document Editor", lines=25, max_lines=25, interactive=True, elem_classes=['scrollable-preview'])
+                
                 edit_status = gr.Textbox(label="Status", interactive=False)
                 
                 with gr.Row():  
