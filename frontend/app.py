@@ -65,6 +65,11 @@ def create_app():
                     fn=lambda content: content,
                     inputs=[editor_content],
                     outputs=[document_preview]
+                ).then(
+                    # Update the document editor with the loaded version content
+                    fn=lambda content: content,
+                    inputs=[editor_content],
+                    outputs=[document_editor]
                 )
                 
             # --- Chat Tab ---  
@@ -419,16 +424,34 @@ def load_version(document_id, version):
         if session_id:
             session = get_session_state(session_id)
             session["current_version"] = version
+            
+            # Get the document content based on version
+            if version == "0":
+                document_content = response.json().get("content", "")
+                # Update the document_data in the session state with the current version's content
+                if "document_data" in session:
+                    session["document_data"]["content"] = document_content
+            else:
+                # For version endpoint, we need to handle the response differently
+                try:
+                    document_content = response.content.decode('utf-8')
+                    # Update the document_data in the session state with the current version's content
+                    if "document_data" in session:
+                        session["document_data"]["content"] = document_content
+                except:
+                    # Fallback if there's an issue with decoding
+                    document_content = response.text if hasattr(response, 'text') else ""
+                    if "document_data" in session:
+                        session["document_data"]["content"] = document_content
+            
+            return document_content
         
-        # For the standard endpoint, content is directly in the JSON
+        # If no session_id found, just return the content without updating session
         if version == "0":
             return response.json().get("content", "")
-        # For version endpoint, we need to handle the response differently
-        # The content should be text/markdown
         try:
             return response.content.decode('utf-8')
         except:
-            # Fallback if there's an issue with decoding
             return response.text if hasattr(response, 'text') else ""
     return ""
 def download_document(document_id, current_content, session_id, version=None):
