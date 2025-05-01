@@ -64,28 +64,23 @@ def create_app():
                     outputs=[version_selector]  
                 )
                 
-            # Define document_editor here, before it's used in any event handlers
-            document_editor = gr.Textbox(
-                label="Document Editor", lines=25, max_lines=25, interactive=True, elem_classes=['scrollable-preview'])
-            edit_status = gr.Textbox(label="Status", interactive=False)
+                # Add version selector change event
+                version_selector.change(  
+                    fn=load_version,  
+                    inputs=[document_selector, version_selector],  
+                    outputs=[editor_content]  
+                ).then(
+                    # Update the document preview with the loaded version content
+                    fn=lambda content: content,
+                    inputs=[editor_content],
+                    outputs=[document_preview]
+                ).then(
+                    # Also update the document editor with the same content
+                    fn=lambda content: content,
+                    inputs=[editor_content],
+                    outputs=[document_editor]
+                )
                 
-            # Now we can safely reference document_editor in the version_selector.change event
-            version_selector.change(  
-                fn=load_version,  
-                inputs=[document_selector, version_selector],  
-                outputs=[editor_content]  
-            ).then(
-                # Update the document preview with the loaded version content
-                fn=lambda content: content,
-                inputs=[editor_content],
-                outputs=[document_preview]
-            ).then(
-                # Also update the document editor with the same content
-                fn=lambda content: content,
-                inputs=[editor_content],
-                outputs=[document_editor]
-            )
-
             # --- Chat Tab ---  
             with gr.TabItem("Chat with Document"):  
                 example_prompts = [  
@@ -110,8 +105,10 @@ def create_app():
 
             # --- Edit Document Tab ---  
             with gr.TabItem("Edit Document"):
-                # Remove the duplicate definition of document_editor and edit_status
-                # as they're now defined outside the tab
+                # Define document_editor and edit_status inside this tab
+                document_editor = gr.Textbox(
+                    label="Document Editor", lines=25, max_lines=25, interactive=True, elem_classes=['scrollable-preview'])
+                edit_status = gr.Textbox(label="Status", interactive=False)
                 
                 with gr.Row():  
                     apply_edits_button = gr.Button("Apply AI Suggestions", elem_classes=["green-button"])  
