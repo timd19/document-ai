@@ -312,8 +312,8 @@ def load_version(document_id, version):
         # For the original version, use the standard document endpoint
         response = safe_api_call("GET", f"{API_URL}/documents/{document_id}")
     else:
-        # For other versions, use the version-specific endpoint
-        response = safe_api_call("GET", f"{API_URL}/documents/{document_id}/version/{version}")
+        # For other versions, use the version-specific endpoint with format=md parameter
+        response = safe_api_call("GET", f"{API_URL}/documents/{document_id}/version/{version}?format=md")
     
     if response:
         # Update the session state with the current version
