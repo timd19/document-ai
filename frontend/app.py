@@ -29,6 +29,13 @@ def create_app():
         gr.Markdown("# Document AI Assistant")  
         document_state, current_document_id, editor_content = gr.State({}), gr.State(None), gr.State("")  
         
+        # Define document_editor at the top level, outside of any tabs
+        # This ensures it's defined before it's referenced in any event handlers
+        document_editor = gr.Textbox(
+            label="Document Editor", lines=25, max_lines=25, interactive=True, elem_classes=['scrollable-preview'],
+            visible=False  # Initially hidden, will be shown in the Edit Document tab
+        )
+        
         with gr.Tabs() as tabs:  
             # --- Document Management Tab ---  
             with gr.TabItem("Document Management"):  
@@ -95,8 +102,9 @@ def create_app():
                 )  
             # --- Edit Document Tab ---  
             with gr.TabItem("Edit Document"):
-                document_editor = gr.Textbox(
-                    label="Document Editor", lines=25, max_lines=25, interactive=True, elem_classes=['scrollable-preview'])
+                # Instead of creating a new document_editor, we'll reuse the one defined earlier
+                # and make it visible in this tab
+                document_editor.visible = True
                 
                 edit_status = gr.Textbox(label="Status", interactive=False)
                 
@@ -211,96 +219,65 @@ def process_chat_message(message, history, session_id):
                 session["last_ai_response"] = full_response  
             else:  
                 yield f"Error: {response.status_code} - {response.text}"
-    except Exception as e:
-        yield f"Error: {str(e)}"
-    return ""
-def load_document_and_versions(document_id, session_id):  
-    # 1) load the document preview + state  
-    preview, doc_data, editor_text, doc_id, status = load_document_preview_and_update_state(document_id, session_id)  
-    # 2) fetch the list of versions e.g. ["v1", "v2", …]  
-    versions = fetch_document_versions(doc_id) or []  
-    # ensure the default prompt is at front  
-    version_choices = ["0"] + versions
-    # 3) return everything in the same order your create_app binds them:  
-    return (  
-      preview,      # document_preview  
-      doc_data,     # document_state  
-      editor_text,  # editor_content  
-      doc_id,       # current_document_id  
-      status,       # status_text  
-      gr.update(choices=version_choices, value="0")  
-    )
+    except Exception as e:  
+        yield f"Error processing message: {str(e)}"  
+def apply_latest_chat_to_editor(chatbot, document_id, session_id):  
+    """Apply the latest AI response to the document editor."""  
+    session = get_session_state(session_id)  
+    last_ai_response = session.get("last_ai_response", "")  
+    if not last_ai_response:  
+        if chatbot and len(chatbot) > 0:  
+            # Try to get the last AI response from the chatbot history  
+            last_entry = chatbot[-1]  
+            if isinstance(last_entry, (list, tuple)) and len(last_entry) == 2:  
+                last_ai_response = last_entry[1] or ""  
+    if not last_ai_response:  
+        return "", "No AI suggestions available to apply."  
+    # Get the current document content  
+    document_data = session.get("document_data", {})  
+    document_content = document_data.get("content", "")  
+    # For now, just replace the content with the AI response  
+    # In a real app, you might want to do something more sophisticated  
+    return last_ai_response, "AI suggestions applied to editor. Review and save changes if desired."  
+def reload_original_document(document_id, session_id):  
+    """Reload the original document content into the editor."""  
+    session = get_session_state(session_id)  
+    document_data = session.get("document_data", {})  
+    document_content = document_data.get("content", "")  
+    return document_content, "Original document content reloaded."  
+def update_active_document_display(document_id, session_id):  
+    """Update the active document display with the current document name."""  
+    session = get_session_state(session_id)  
+    document_data = session.get("document_data", {})  
+    document_name = document_data.get("name", "No document")  
+    if document_id and document_id != "Select Document":  
+        return f"Active: {document_name} (ID: {document_id})"  
+    return "No document selected"  
 def get_documents_list():  
+    """Get list of available documents from the API."""  
     response = safe_api_call("GET", f"{API_URL}/documents")  
     if response:  
         documents = response.json().get("documents", [])  
-        return [(f"{doc['name']} (ID: {doc['id']})", doc['id']) for doc in documents]   
+        return [doc.get("id") for doc in documents]  
     return []  
-def update_active_document_display(document_id, session_id):  
-    if not document_id:  
-        return "No document selected"  
-    response = safe_api_call("GET", f"{API_URL}/documents/{document_id}")  
-    if response:  
-        document_data = response.json()  
-        document_name = document_data.get("name", "Unnamed")  
-        return f"Name: {document_name} | ID: {document_id}"  
-    return f"ID: {document_id}"  
-def reload_original_document(document_id, session_id):  
-    if isinstance(document_id, list):  
-        document_id = document_id[0] if document_id else None  
-    if not document_id:  
-        return "", "No document selected."  
-    response = safe_api_call("GET", f"{API_URL}/documents/{document_id}")  
-    if response:  
-        document_data = response.json()  
-        document_text = document_data.get("content", "")  
-        session = get_session_state(session_id)  
-        session["document_data"] = document_data  
-        return document_text, "Original document loaded successfully."  
-    return "", "Error loading original document."  
-def apply_latest_chat_to_editor(chat_history, document_id, session_id):  
-    if isinstance(document_id, list):  
-        document_id = document_id[0] if document_id else None  
-    if not document_id:  
-        return "", "No document selected."  
-    session = get_session_state(session_id)  
-    latest_ai_response = session.get("last_ai_response", "")  
-    if latest_ai_response:  
-        return latest_ai_response, "AI suggestions loaded. Review and click 'Save Changes' to apply."  
-    return "", "No AI suggestions available. Try having a conversation first."  
 def upload_document(file_path, session_id):  
-    """  
-    - file_path: the path to the temp file that Gradio gives you  
-    - session_id: your existing session key  
-    """  
+    """Upload a document to the API."""  
     if not file_path:  
         return "No file selected.", None  
-    # Extract the real filename+ext  
-    filename = os.path.basename(file_path)  
-    # Open that temp file directly  
-    with open(file_path, "rb") as f:  
-        files = {  
-            "file": (filename, f)  
-        }  
-        response = safe_api_call(  
-            "POST",  
-            f"{API_URL}/documents/upload",  
-            files=files  
-        )  
-    if not response:  
-        return "Error uploading document.", None  
-    result = response.json()  
-    doc_id = result.get("document_id")  
-    # Store into your session and fetch the MD back  
-    session = get_session_state(session_id)  
-    session["document_id"] = doc_id  
-    doc_response = safe_api_call("GET", f"{API_URL}/documents/{doc_id}")  
-    if doc_response:  
-        session["document_data"] = doc_response.json()  
-    return f"Document uploaded successfully. ID: {doc_id}", doc_id  
+    try:  
+        with open(file_path, "rb") as f:  
+            files = {"file": f}  
+            response = requests.post(f"{API_URL}/documents/upload", files=files)  
+            if response.status_code == 200:  
+                document_id = response.json().get("document_id")  
+                return f"Document uploaded successfully! ID: {document_id}", document_id  
+            return f"Error uploading document: {response.status_code} - {response.text}", None  
+    except Exception as e:  
+        return f"Error uploading document: {str(e)}", None  
 def update_after_upload(document_id, session_id):  
+    """Update UI after document upload."""  
     if not document_id:  
-        return [], "", {}, ""  
+        return gr.update(), "", {}, ""  
     documents_list = get_documents_list()  
     if document_id not in documents_list:  
         documents_list.append(document_id)  
@@ -357,6 +334,15 @@ def build_document_management_ui():
                 elem_classes=["scrollable-preview"],  
             )  
     return document_upload, document_selector, document_preview, status_text, active_document_display, refresh_button, download_button, version_selector
+def load_document_and_versions(document_id, session_id):
+    """Load document content, update state, and fetch versions."""
+    preview, state, content, doc_id, status, versions = load_document_preview_and_update_state(document_id, session_id)
+    # Fetch versions for the document
+    if doc_id:
+        version_list = fetch_document_versions(doc_id)
+        if version_list:
+            return preview, state, content, doc_id, status, gr.update(choices=version_list)
+    return preview, state, content, doc_id, status, gr.update(choices=["0"])
 def load_document_preview_and_update_state(document_id, session_id):  
     if not document_id or document_id == "Select Document":  
         get_session_state(session_id)["document_id"] = None  
@@ -494,3 +480,4 @@ def download_document(document_id, current_content, session_id, version=None):
 app = create_app()  
 if __name__ == "__main__":  
     app.launch(server_name="0.0.0.0", server_port=7860)
+
