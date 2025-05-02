@@ -43,7 +43,7 @@ def create_app():
             # --- Document Management Tab ---  
             with gr.TabItem("Document Management"):  
                 (document_upload, document_selector, document_preview, status_text,  
-                 active_document_display, refresh_button, download_button) = build_document_management_ui()  
+                 active_document_display, refresh_button, version_selector, download_button) = build_document_management_ui()  
 
                 refresh_button.click(  
                     fn=refresh_documents,  
@@ -55,9 +55,16 @@ def create_app():
                     outputs=[active_document_display]  
                 )  
 
+                # Update version selector when document is selected
+                document_selector.change(
+                    fn=get_document_versions,
+                    inputs=[document_selector, session_id],
+                    outputs=[version_selector]
+                )
+
                 download_button.click(  
-                    fn=download_document,  
-                    inputs=[document_selector, document_preview, session_id],  
+                    fn=download_document_version,  
+                    inputs=[document_selector, version_selector, session_id],  
                     outputs=[gr.File(label="Downloaded Document")]  
                 )  
 
@@ -206,34 +213,41 @@ def process_chat_message(message, history, session_id):
     except Exception as e:  
         yield f"Error: {str(e)}"  
 
-def build_document_management_ui():  
-    with gr.Row():  
-        with gr.Column(scale=1):  
-            document_upload = gr.File(  
-                label="Upload Document", file_types=[".md", ".docx", ".pdf"], type="filepath"  
-            )  
-            status_text = gr.Textbox(label="Status", interactive=False)  
-            active_document_display = gr.Textbox(  
-                label="Active Document", value="No document selected", interactive=False  
-            )  
-            refresh_button = gr.Button("Refresh Documents", elem_classes=["orange-button"])  
-            download_button = gr.Button("Download Document", elem_classes=["green-button"])  
-        with gr.Column(scale=2):  
-            document_selector = gr.Dropdown(  
-                label="Select Document",  
-                choices=["Select Document"] + get_documents_list(),  
-                value="Select Document",  
+def build_document_management_ui():
+    with gr.Row():
+        with gr.Column(scale=1):
+            document_upload = gr.File(
+                label="Upload Document", file_types=[".md", ".docx", ".pdf"], type="filepath"
+            )
+            status_text = gr.Textbox(label="Status", interactive=False)
+            active_document_display = gr.Textbox(
+                label="Active Document", value="No document selected", interactive=False
+            )
+            refresh_button = gr.Button("Refresh Documents", elem_classes=["orange-button"])
+            version_selector = gr.Dropdown(
+                label="Select Version to Download",
+                choices=[],
+                value=None,
+                interactive=True,
+                visible=False
+            )
+            download_button = gr.Button("Download Document", elem_classes=["green-button"])
+        with gr.Column(scale=2):
+            document_selector = gr.Dropdown(
+                label="Select Document",
+                choices=["Select Document"] + get_documents_list(),
+                value="Select Document",
                 interactive=True,
                 filterable=True
-            )  
-            document_preview = gr.Textbox(  
-                label="Document Preview",  
-                lines=25,  
-                max_lines=25,  
-                interactive=False,  
-                elem_classes=["scrollable-preview"],  
-            )  
-    return document_upload, document_selector, document_preview, status_text, active_document_display, refresh_button, download_button  
+            )
+            document_preview = gr.Textbox(
+                label="Document Preview",
+                lines=25,
+                max_lines=25,
+                interactive=False,
+                elem_classes=["scrollable-preview"],
+            )
+    return document_upload, document_selector, document_preview, status_text, active_document_display, refresh_button, version_selector, download_button
 
 def get_documents_list():  
     response = safe_api_call("GET", f"{API_URL}/documents")  
@@ -395,25 +409,60 @@ def save_document_changes(document_id, document_content, session_id):
     else:  
         return document_content, "Error saving document.", {}  
 
-def download_document(document_id, current_content, session_id):  
-    if document_id == "Select Document":  
-        return None  
-    if isinstance(document_id, list):  
-        document_id = document_id[0] if document_id else None  
-    if not document_id:  
-        return None  
-    response = safe_api_call("GET", f"{API_URL}/documents/{document_id}/download")  
-    if response:  
-        filename_response = safe_api_call("GET", f"{API_URL}/documents/{document_id}")  
-        filename = "document.txt"  
-        if filename_response:  
-            doc_data = filename_response.json()  
-            filename = doc_data.get("name", filename)  
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{filename}")  
-        temp_file.write(response.content)  
-        temp_file.close()  
-        return temp_file.name  
-    return None  
+def download_document_version(document_id, version_filename, session_id):
+    """Download a specific version of a document."""
+    if document_id == "Select Document":
+        return None
+    if isinstance(document_id, list):
+        document_id = document_id[0] if document_id else None
+    if not document_id:
+        return None
+    
+    # If no version is selected, use the default download endpoint
+    if not version_filename:
+        response = safe_api_call("GET", f"{API_URL}/documents/{document_id}/download")
+    else:
+        response = safe_api_call("GET", f"{API_URL}/documents/{document_id}/download/{version_filename}")
+    
+    if response:
+        filename_response = safe_api_call("GET", f"{API_URL}/documents/{document_id}")
+        filename = "document.txt"
+        if filename_response:
+            doc_data = filename_response.json()
+            filename = doc_data.get("name", filename)
+            
+            # If it's an export version, add the date to the filename
+            if version_filename and version_filename.startswith("exports/"):
+                date_str = version_filename.replace("exports/", "").split(".")[0]
+                ext = filename.split(".")[-1]
+                filename = f"{filename.rsplit('.', 1)[0]}-{date_str}.{ext}"
+        
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{filename}")
+        temp_file.write(response.content)
+        temp_file.close()
+        return temp_file.name
+    
+    return None
+
+def get_document_versions(document_id, session_id):
+    """Get all available versions of a document."""
+    if document_id == "Select Document":
+        return gr.update(choices=[], value=None, visible=False)
+    if isinstance(document_id, list):
+        document_id = document_id[0] if document_id else None
+    if not document_id:
+        return gr.update(choices=[], value=None, visible=False)
+    
+    response = safe_api_call("GET", f"{API_URL}/documents/{document_id}/versions")
+    if response:
+        versions_data = response.json().get("versions", [])
+        if versions_data:
+            choices = [(version["display_name"], version["filename"]) for version in versions_data]
+            # Set default to the original file if available
+            default_value = next((v["filename"] for v in versions_data if v["type"] == "original"), None)
+            return gr.update(choices=choices, value=default_value, visible=True)
+    
+    return gr.update(choices=[], value=None, visible=False)
 
 # --- Run the App ---  
 app = create_app()  
