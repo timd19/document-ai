@@ -60,36 +60,3 @@ def create_chat_history(db: Session, user_message: str, assistant_response: str,
     db.commit()  
     db.refresh(db_chat)  
     return db_chat
-
-# versioning documents
-
-def get_latest_version(db: Session, document_id: str) -> int:  
-    row = (  
-        db.query(models.DocumentVersion)  
-          .filter(models.DocumentVersion.document_id == document_id)  
-          .order_by(models.DocumentVersion.version.desc())  
-          .first()  
-    )  
-    return row.version if row else 0  
-
-def create_document_version(  
-    db: Session, document_id: str,  
-    version: int, md_blob: str, export_blob: str  
-):  
-    dv = models.DocumentVersion(  
-       document_id=document_id,  
-       version=version,  
-       md_blob=md_blob,  
-       export_blob=export_blob  
-    )  
-    db.add(dv)  
-    db.commit()  
-    return dv  
-
-def list_document_versions(db: Session, document_id: str):  
-    return (  
-      db.query(models.DocumentVersion)  
-        .filter(models.DocumentVersion.document_id == document_id)  
-        .order_by(models.DocumentVersion.version)  
-        .all()  
-    )  

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Integer
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey  
 from sqlalchemy.ext.declarative import declarative_base  
 from sqlalchemy.orm import relationship  
 import uuid  
@@ -14,8 +14,7 @@ class Document(Base):
     canonical_md = Column(String, nullable=True)  # NEW: blob name for canonical markdown
     last_export = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)  
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    versions = relationship("DocumentVersion", back_populates="document")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  
     chat_history = relationship("ChatHistory", back_populates="document")  
 
 class ChatHistory(Base):  
@@ -26,14 +25,3 @@ class ChatHistory(Base):
     document_id = Column(String, ForeignKey("documents.id"), nullable=True)  
     created_at = Column(DateTime, default=datetime.utcnow)  
     document = relationship("Document", back_populates="chat_history")
-
-class DocumentVersion(Base):  
-    __tablename__ = "document_versions"  
-    id = Column(Integer, primary_key=True, index=True)  
-    document_id = Column(String, ForeignKey("documents.id"), index=True)  
-    version = Column(Integer, nullable=False)  
-    md_blob = Column(String, nullable=False)    # e.g. "v2.md"  
-    export_blob = Column(String, nullable=False) # e.g. "v2.docx"  
-    created_at = Column(DateTime, default=datetime.utcnow)  
-
-    document = relationship("Document", back_populates="versions")  

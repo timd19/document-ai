@@ -13,7 +13,7 @@ import os
 
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
-from db.database import get_db, SessionLocal 
+from db.database import get_db  
 from db import crud, models  
 from utils.azure_blob import AzureBlobStorage  
 
@@ -51,55 +51,6 @@ async def _convert_markdown_and_upload(
     ts = datetime.datetime.utcnow().strftime("%Y%m%d%H%M%S")  
     export_blob = f"exports/{ts}.{target_ext}"  
     blob_storage.upload_document(document_id, export_blob, converted)
-
-# versioning helper
-
-async def _convert_and_record_version(  
-    document_id: str,  
-    version: int,  
-    source_md_blob: str,  
-    original_ext: str,  
-    blob_storage: AzureBlobStorage,  
-    converter_url: str  
-):  
-    try:  
-        # 1) download that version's markdown  
-        md_bytes = blob_storage.download_document(document_id, source_md_blob)  
-
-        # 2) convert via Pandoc microservice  
-        async with httpx.AsyncClient(timeout=120.0) as client:  
-            files = {"file": (source_md_blob, md_bytes, "text/markdown")}  
-            resp = await client.post(  
-                f"{converter_url}/convert/from-md?target={original_ext}",  
-                files=files  
-            )  
-            resp.raise_for_status()  
-            converted = resp.content  
-
-        # 3) upload the new export blob  
-        export_blob = f"document-v{version}.{original_ext}"  
-        blob_storage.upload_document(document_id, export_blob, converted)  
-
-        # 4) record in the DB  
-        db = SessionLocal()  
-        try:  
-            crud.create_document_version(db,  
-              document_id=document_id,  
-              version=version,  
-              md_blob=source_md_blob,  
-              export_blob=export_blob  
-            )  
-            # Optionally update the document's last_export field  
-            doc = crud.get_document(db, document_id)  
-            if doc:  
-                doc.last_export = export_blob  
-                db.commit()  
-        finally:  
-            db.close()  
-    except Exception as e:  
-        # Log the error  
-        logging.error(f"Error in version conversion: {str(e)}")
-
 
 # Helper: Generate canonical blob names  
 def get_canonical_md_blob():  
@@ -205,46 +156,35 @@ async def upload_document(
         logging.error(f"Exception in upload_document:\n{str(e)}")  
         raise HTTPException(status_code=500, detail=f"Error uploading document: {str(e)}")  
 
-@router.put("/{document_id}", response_model=Dict[str,str])  
+@router.put("/{document_id}", response_model=Dict[str, str])  
 async def update_document(  
     document_id: str,  
     request: Dict[str, str],  
     background_tasks: BackgroundTasks,  
     db: Session = Depends(get_db)  
 ):  
-    doc = crud.get_document(db, document_id)  
-    if not doc:  
+    document = crud.get_document(db, document_id)  
+    if not document:  
         raise HTTPException(404, "Document not found")  
 
-    # Determine next version number  
-    latest = crud.get_latest_version(db, document_id)  
-    new_version = latest + 1  
+    # 1) Upload the new canonical markdown  
+    document_text = request.get("document_text", "")  
+    md_blob = document.canonical_md or "canonical.md"  
+    blob_storage.upload_document(document_id, md_blob, document_text)  
+    crud.update_document(db, document_id)  
 
-    # Upload new version of the document  
-    text = request.get("document_text", "")  
-    md_blob = f"document-v{new_version}.md"  
-    blob_storage.upload_document(document_id, md_blob, text)  
-
-    # Update the canonical document  
-    blob_storage.upload_document(document_id, "canonical.md", text)  
-    crud.update_document(db, document_id)  # just bumps updated_at  
-    
-    # Determine original format (from the original filename)  
-    original_filename = doc.name  
-    original_ext = original_filename.rsplit('.', 1)[-1].lower() if '.' in original_filename else 'docx'  
-    
-    # Add background task to convert and record version  
+    # 2) Schedule a background conversion into the original format  
+    #    Extract the extension from the original filename  
+    original_ext = document.name.rsplit(".", 1)[-1].lower()  
     background_tasks.add_task(  
-        _convert_and_record_version,  
-        document_id=document_id,  
-        version=new_version,  
-        source_md_blob=md_blob,  
-        original_ext=original_ext,  
-        blob_storage=blob_storage,  
-        converter_url=CONVERTER_MICROSERVICE_URL  
+        _convert_markdown_and_upload,  
+        document_id,  
+        original_ext,  
+        blob_storage,  
+        CONVERTER_MICROSERVICE_URL  
     )  
 
-    return {"message": f"Saved as version {new_version}; export enqueued"}     
+    return {"message": "Document updated successfully; export in progress"}   
 
 @router.delete("/{document_id}", response_model=Dict[str, str])  
 async def delete_document(document_id: str, db: Session = Depends(get_db)):  
@@ -325,60 +265,3 @@ async def export_document(
             )  
     except Exception as e:  
         raise HTTPException(status_code=500, detail=f"Error exporting document: {str(e)}")
-    
-@router.get("/{document_id}/version/{version}")  
-async def download_version(  
-    document_id: str,  
-    version: int,  
-    format: str = None,  # Optional parameter to request a different format  
-    db: Session = Depends(get_db)  
-):  
-    doc = crud.get_document(db, document_id)  
-    if not doc:  
-        raise HTTPException(404, "Document not found")  
-
-    vv = (  
-        db.query(models.DocumentVersion)  
-        .filter_by(document_id=document_id, version=version)  
-        .first()  
-    )  
-    if not vv:  
-        raise HTTPException(404, "Version not found")  
-    
-    if format == "md":  
-        # Return markdown version  
-        content = blob_storage.get_document_text(document_id, vv.md_blob)  
-        return StreamingResponse(  
-            io.BytesIO(content.encode('utf-8')),  
-            media_type="text/markdown",  
-            headers={"Content-Disposition": f"attachment; filename={doc.name.rsplit('.',1)[0]}-v{version}.md"}  
-        )  
-    else:  
-        # Return exported version  
-        blob_name = vv.export_blob  
-        mime = doc.mime_type  
-        filename = f"{doc.name.rsplit('.',1)[0]}-v{version}.{doc.name.rsplit('.',1)[1]}"  
-        
-        content = blob_storage.download_document(document_id, blob_name)  
-        return StreamingResponse(  
-            io.BytesIO(content),  
-            media_type=mime or "application/octet-stream",  
-            headers={"Content-Disposition": f"attachment; filename={filename}"}  
-        )
-
-@router.get("/{document_id}/versions", response_model=List[Dict[str, Any]])  
-async def get_versions(document_id: str, db: Session = Depends(get_db)):  
-    doc = crud.get_document(db, document_id)  
-    if not doc:  
-        raise HTTPException(404, "Document not found")  
-    
-    versions = crud.list_document_versions(db, document_id)  
-    return [  
-        {  
-            "version": v.version,  
-            "md_blob": v.md_blob,  
-            "export_blob": v.export_blob,  
-            "created_at": v.created_at,  
-        }  
-        for v in versions  
-    ]
