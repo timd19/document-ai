@@ -155,7 +155,11 @@ def create_app():
             fn=lambda doc_content: doc_content,  
             inputs=[document_preview],  
             outputs=[document_editor]  
-        )  
+        ).then(
+            fn=get_document_versions,
+            inputs=[current_document_id, session_id],
+            outputs=[version_selector]
+        )
 
         app.load(fn=on_page_load, inputs=None, outputs=[session_id])  
 
@@ -407,7 +411,7 @@ def save_document_changes(document_id, document_content, session_id):
         else:  
             return document_content, "Document saved, but could not refresh preview.", {}  
     else:  
-        return document_content, "Error saving document.", {}  
+        return document_content, "Error saving document.", {}
 
 def download_document_version(document_id, version_filename, session_id):
     """Download a specific version of a document."""

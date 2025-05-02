@@ -290,9 +290,17 @@ async def download_document_version(document_id: str, filename: str, db: Session
         # If it's an export file, extract the date from the filename
         if filename.startswith("exports/"):
             date_str = filename.replace("exports/", "").split(".")[0]
+            ext = filename.split(".")[-1]
             download_filename = f"{original_name}-{date_str}.{ext}"
+        elif filename == "canonical.md":
+            download_filename = f"{original_name}.md"
         else:
-            download_filename = f"{original_name}.{ext}"
+            # For original files, keep the original extension
+            original_ext = document.name.split(".")[-1]
+            if filename.startswith("original/"):
+                download_filename = document.name
+            else:
+                download_filename = f"{original_name}.{ext}"
         
         return StreamingResponse(
             io.BytesIO(content),
