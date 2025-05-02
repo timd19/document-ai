@@ -27,29 +27,37 @@ blob_storage = AzureBlobStorage()
 
 CONVERTER_MICROSERVICE_URL = os.environ.get("CONVERTER_MICROSERVICE_URL")
 
-# background‐task helper
-async def _convert_markdown_and_upload(  
-    document_id: str,  
-    target_ext: str,  
-    blob_storage: AzureBlobStorage,  
-    converter_url: str  
-):  
-    # 1) Download the canonical.md  
-    md_bytes = blob_storage.download_document(document_id, "canonical.md")  
+# background\u2010task helper
+async def _convert_markdown_and_upload(
+    document_id: str,
+    target_ext: str,
+    blob_storage: AzureBlobStorage,
+    converter_url: str
+):
+    # Get document info to use original name in the export
+    from db.database import get_db
+    from db import crud
+    
+    # Create a new session for database access
+    db = next(get_db())
+    document = crud.get_document(db, document_id)
+    
+    # 1) Download the canonical.md
+    md_bytes = blob_storage.download_document(document_id, "canonical.md")
 
-    # 2) Call converter microservice  
-    async with httpx.AsyncClient(timeout=120.0) as client:  
-        files = {"file": ("canonical.md", md_bytes, "text/markdown")}  
-        resp = await client.post(  
-            f"{converter_url}/convert/from-md?target={target_ext}",  
-            files=files  
-        )  
-        resp.raise_for_status()  
-        converted = resp.content  
+    # 2) Call converter microservice
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        files = {"file": ("canonical.md", md_bytes, "text/markdown")}
+        resp = await client.post(
+            f"{converter_url}/convert/from-md?target={target_ext}",
+            files=files
+        )
+        resp.raise_for_status()
+        converted = resp.content
 
-    # 3) Upload under e.g. exports/  
-    ts = datetime.datetime.utcnow().strftime("%Y%m%d%H%M%S")  
-    export_blob = f"exports/{ts}.{target_ext}"  
+    # 3) Upload under e.g. exports/
+    ts = datetime.datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    export_blob = f"exports/{ts}.{target_ext}"
     blob_storage.upload_document(document_id, export_blob, converted)
 
 # Helper: Generate canonical blob names  
@@ -167,24 +175,24 @@ async def update_document(
     if not document:  
         raise HTTPException(404, "Document not found")  
 
-    # 1) Upload the new canonical markdown  
-    document_text = request.get("document_text", "")  
-    md_blob = document.canonical_md or "canonical.md"  
-    blob_storage.upload_document(document_id, md_blob, document_text)  
-    crud.update_document(db, document_id)  
+    # 1) Upload the new canonical markdown
+    document_text = request.get("document_text", "")
+    md_blob = document.canonical_md or "canonical.md"
+    blob_storage.upload_document(document_id, md_blob, document_text)
+    crud.update_document(db, document_id)
 
-    # 2) Schedule a background conversion into the original format  
-    #    Extract the extension from the original filename  
-    original_ext = document.name.rsplit(".", 1)[-1].lower()  
-    background_tasks.add_task(  
-        _convert_markdown_and_upload,  
-        document_id,  
-        original_ext,  
-        blob_storage,  
-        CONVERTER_MICROSERVICE_URL  
-    )  
+    # 2) Schedule a background conversion into the original format
+    #    Extract the extension from the original filename
+    original_ext = document.name.rsplit(".", 1)[-1].lower()
+    background_tasks.add_task(
+        _convert_markdown_and_upload,
+        document_id,
+        original_ext,
+        blob_storage,
+        CONVERTER_MICROSERVICE_URL
+    )
 
-    return {"message": "Document updated successfully; export in progress"}   
+    return {"message": "Document updated successfully; export in progress"}
 
 @router.delete("/{document_id}", response_model=Dict[str, str])  
 async def delete_document(document_id: str, db: Session = Depends(get_db)):  
@@ -203,24 +211,115 @@ async def delete_document(document_id: str, db: Session = Depends(get_db)):
     except Exception as e:  
         raise HTTPException(status_code=500, detail=f"Error deleting document: {str(e)}")  
 
-@router.get("/{document_id}/download")  
-async def download_document(document_id: str, db: Session = Depends(get_db)):  
-    """  
-    Download the original uploaded file (not markdown/export).  
-    """  
-    document = crud.get_document(db, document_id)  
-    if not document:  
-        raise HTTPException(status_code=404, detail="Document not found")  
-    try:  
-        orig_blob = get_original_blob(document.name)  
-        content = blob_storage.download_document(document_id, orig_blob)  
-        return StreamingResponse(  
-            io.BytesIO(content),  
-            media_type=document.mime_type or "application/octet-stream",  
-            headers={"Content-Disposition": f"attachment; filename={document.name}"}  
-        )  
-    except Exception as e:  
-        raise HTTPException(status_code=500, detail=f"Error downloading original document: {str(e)}")  
+@router.get("/{document_id}/versions", response_model=Dict[str, List[Dict[str, Any]]])
+async def get_document_versions(document_id: str, db: Session = Depends(get_db)):
+    """Get all available versions of a document (original and exports)."""
+    document = crud.get_document(db, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    try:
+        # List all blobs for this document
+        blobs = blob_storage.list_documents(document_id)
+        
+        # Organize blobs into categories
+        versions = []
+        
+        # Add original document
+        original_files = [blob for blob in blobs if blob.startswith("original/")]
+        for file in original_files:
+            versions.append({
+                "filename": file,
+                "display_name": file.replace("original/", "Original: "),
+                "type": "original"
+            })
+        
+        # Add exported versions
+        export_files = [blob for blob in blobs if blob.startswith("exports/")]
+        for file in export_files:
+            # Extract date from filename (format: exports/YYYYMMDDHHMMSS.ext)
+            date_str = file.replace("exports/", "").split(".")[0]
+            try:
+                date = datetime.datetime.strptime(date_str, "%Y%m%d%H%M%S")
+                formatted_date = date.strftime("%Y-%m-%d %H:%M:%S")
+                display_name = f"Export: {formatted_date} ({file.split('.')[-1]})"
+            except ValueError:
+                display_name = file.replace("exports/", "Export: ")
+            
+            versions.append({
+                "filename": file,
+                "display_name": display_name,
+                "type": "export"
+            })
+        
+        # Add canonical markdown
+        if "canonical.md" in blobs:
+            versions.append({
+                "filename": "canonical.md",
+                "display_name": "Current Working Version (Markdown)",
+                "type": "canonical"
+            })
+        
+        return {"versions": versions}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving document versions: {str(e)}")
+
+@router.get("/{document_id}/download/{filename}")
+async def download_document_version(document_id: str, filename: str, db: Session = Depends(get_db)):
+    """
+    Download a specific version of a document.
+    """
+    document = crud.get_document(db, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    try:
+        content = blob_storage.download_document(document_id, filename)
+        
+        # Determine content type based on file extension
+        ext = filename.split(".")[-1].lower()
+        content_types = {
+            "md": "text/markdown",
+            "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "pdf": "application/pdf",
+            "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        }
+        content_type = content_types.get(ext, "application/octet-stream")
+        
+        # Get original document name for better download filename
+        original_name = document.name.rsplit(".", 1)[0]
+        
+        # If it's an export file, extract the date from the filename
+        if filename.startswith("exports/"):
+            date_str = filename.replace("exports/", "").split(".")[0]
+            download_filename = f"{original_name}-{date_str}.{ext}"
+        else:
+            download_filename = f"{original_name}.{ext}"
+        
+        return StreamingResponse(
+            io.BytesIO(content),
+            media_type=content_type,
+            headers={"Content-Disposition": f"attachment; filename={download_filename}"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error downloading document version: {str(e)}")
+
+@router.get("/{document_id}/download")
+async def download_document(document_id: str, db: Session = Depends(get_db)):
+    """
+    Download the original uploaded file (not markdown/export).
+    """
+    document = crud.get_document(db, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    try:
+        orig_blob = get_original_blob(document.name)
+        content = blob_storage.download_document(document_id, orig_blob)
+        return StreamingResponse(
+            io.BytesIO(content),
+            media_type=document.mime_type or "application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename={document.name}"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error downloading original document: {str(e)}")
 
 @router.get("/{document_id}/export")  
 async def export_document(  
@@ -255,13 +354,19 @@ async def export_document(
                 if resp.status_code != 200:  
                     raise Exception(f"Conversion from markdown failed: {resp.content}")  
                 content = resp.content  
-            # Optionally archive export  
-            export_blob = get_export_blob(target)  
-            blob_storage.upload_document(document_id, export_blob, content)  
+            # Generate timestamp for the export
+            ts = datetime.datetime.utcnow().strftime("%Y%m%d%H%M%S")
+            # Create export blob path
+            export_blob = f"exports/{ts}.{target}"
+            # Upload to blob storage
+            blob_storage.upload_document(document_id, export_blob, content)
+            # Use original name with timestamp for download
+            original_name = document.name.rsplit('.',1)[0]
+            download_filename = f"{original_name}-{ts}.{target}"
             return StreamingResponse(  
                 io.BytesIO(content),  
                 media_type="application/octet-stream",  
-                headers={"Content-Disposition": f"attachment; filename={document.name.rsplit('.',1)[0]}.{target}"}  
+                headers={"Content-Disposition": f"attachment; filename={download_filename}"}  
             )  
     except Exception as e:  
         raise HTTPException(status_code=500, detail=f"Error exporting document: {str(e)}")
